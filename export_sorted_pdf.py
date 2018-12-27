@@ -53,12 +53,14 @@ class ExportSortedPDF:
         self.config.set('EXPORT', 'filename', 'sample.pdf')
         self.config.set('EXPORT', 'outputfile', 'sample_ordered.pdf')
         self.config.set('EXPORT', 'tempdir', './export')
-        self.config.set('EXPORT', 'searchterm', 'Prezado\(a\)\s+\(cid:13\)([\w\s]+)')
+        self.config.set('EXPORT', 'searchterm', 'Prezado[\(a\)\/]+\s+(?:\(cid:13\))?([\w\s]+)')
         self.config.set('EXPORT', 'outputname', 'export\{}_{}.pdf')
         self.config.set('EXPORT', 'mergeterm', 'export\*.pdf')
         self.config.set('EXPORT', 'debug', 'False')
         self.config.set('EXPORT', 'deletetempdir', 'True')
         self.config.set('EXPORT', 'printtext', 'False')
+        self.config.set('EXPORT', 'breakpagestart', '0')
+        self.config.set('EXPORT', 'breakpageend', '0')
         self.config.write(cfgfile)
       finally:
         cfgfile.close()
@@ -80,6 +82,9 @@ class ExportSortedPDF:
         self.debug = self.config["EXPORT"].getboolean("debug", False)
         self.deletetempdir = self.config["EXPORT"].getboolean("deletetempdir", False)
         self.printtext = self.config["EXPORT"].getboolean("printtext", False)
+        self.breakpagestart = self.config["EXPORT"].getint("breakpagestart", 0)
+        self.breakpageend = self.config["EXPORT"].getint("breakpageend", 0)
+
     
     def config_log(self):
         if not self.isDebug():
@@ -102,6 +107,13 @@ class ExportSortedPDF:
             for page in PDFPage.get_pages(fh,
                                           caching=True,
                                           check_extractable=True):
+                if self.breakpagestart > npage:
+                    npage += 1
+                    continue
+                
+                if npage != 0 and npage > self.breakpageend:
+                    break
+
                 resource_manager = PDFResourceManager()
                 fake_file_handle = io.StringIO()
                 converter = TextConverter(resource_manager, fake_file_handle)
@@ -135,6 +147,12 @@ class ExportSortedPDF:
         pdf = PdfFileReader(self.filename)
         npages = pdf.getNumPages()
         for npage in range(npages):
+            if self.breakpagestart > npage:
+                continue
+            
+            if npage != 0 and npage > self.breakpageend:
+                break
+
             pdf_writer = PdfFileWriter()
             page = pdf.getPage(npage)
             pdf_writer.addPage(page)
