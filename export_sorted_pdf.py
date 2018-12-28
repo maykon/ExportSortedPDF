@@ -14,7 +14,6 @@ from pdfminer.pdfinterp import PDFPageInterpreter
 from pdfminer.pdfinterp import PDFResourceManager
 from pdfminer.pdfpage import PDFPage
 
-
 class ExportSortedPDF:
 
     def __init__(self):
@@ -50,8 +49,8 @@ class ExportSortedPDF:
       cfgfile = open(self.cfilename,'w')
       try:        
         self.config.add_section('EXPORT')
-        self.config.set('EXPORT', 'filename', 'sample.pdf')
-        self.config.set('EXPORT', 'outputfile', 'sample_ordered.pdf')
+        self.config.set('EXPORT', 'filename', '')
+        self.config.set('EXPORT', 'outputfile', '')
         self.config.set('EXPORT', 'tempdir', './export')
         self.config.set('EXPORT', 'searchterm', 'Prezado[\(a\)\/]+\s+(?:\(cid:13\))?([\w\s]+)')
         self.config.set('EXPORT', 'outputname', 'export\{}_{}.pdf')
@@ -61,6 +60,7 @@ class ExportSortedPDF:
         self.config.set('EXPORT', 'printtext', 'False')
         self.config.set('EXPORT', 'breakpagestart', '0')
         self.config.set('EXPORT', 'breakpageend', '0')
+        self.config.set('EXPORT', 'removepattern', '')
         self.config.write(cfgfile)
       finally:
         cfgfile.close()
@@ -72,7 +72,7 @@ class ExportSortedPDF:
         if not os.path.isfile(self.cfilename):
           raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), self.cfilename)
 
-        self.config.read(self.cfilename)
+        self.config.read(self.cfilename, encoding='utf-8')
         self.filename = str(self.config["EXPORT"]["filename"])
         self.outputfile = str(self.config["EXPORT"]["outputfile"])
         self.tempdir = str(self.config["EXPORT"]["tempdir"])
@@ -84,6 +84,10 @@ class ExportSortedPDF:
         self.printtext = self.config["EXPORT"].getboolean("printtext", False)
         self.breakpagestart = self.config["EXPORT"].getint("breakpagestart", 0)
         self.breakpageend = self.config["EXPORT"].getint("breakpageend", 0)
+        self.removepattern = str(self.config["EXPORT"]["removepattern"])
+
+        self.filename = self.get_input_filename()
+        self.outputfile = self.get_output_filename()
 
     
     def config_log(self):
@@ -93,6 +97,10 @@ class ExportSortedPDF:
         self.logger.setLevel(logging.DEBUG)
         for key in self.config["EXPORT"]:
             self.logger.debug("Config %s: %s", key, self.config["EXPORT"][key])
+        
+        self.logger.debug("Config filename: %s", self.filename)
+        self.logger.debug("Config outputfile: %s", self.outputfile)
+
 
     def isDebug(self):
       return self.debug
@@ -107,11 +115,11 @@ class ExportSortedPDF:
             for page in PDFPage.get_pages(fh,
                                           caching=True,
                                           check_extractable=True):
-                if self.breakpagestart > npage:
+                if self.breakpagestart != 0 and self.breakpagestart > npage:
                     npage += 1
                     continue
                 
-                if npage != 0 and npage > self.breakpageend:
+                if self.breakpageend != 0 and self.breakpageend < npage:
                     break
 
                 resource_manager = PDFResourceManager()
@@ -122,6 +130,7 @@ class ExportSortedPDF:
                 page_interpreter.process_page(page)
 
                 text = fake_file_handle.getvalue()
+                text = self.remove_text_pattern(text)
                 if self.printtext:
                   self.logger.debug(text)
 
@@ -129,6 +138,7 @@ class ExportSortedPDF:
                 name = "page_{}".format(npage)
                 if regex_search:
                   name = regex_search.group(1).strip()
+                  name = re.sub(r'\s{2,}', '', name)
 
                 self.logger.debug("Termo: %s - Página: %s", name, npage)
 
@@ -141,16 +151,23 @@ class ExportSortedPDF:
           
         self.logger.info('Finalizando extração de dados')
 
+    def remove_text_pattern(self, text):
+        if not self.removepattern:
+            return text
+
+        rtex = re.sub(self.removepattern, '', text)
+        return rtex
+            
 
     def criar_pdfs_termo(self):
         self.logger.info("Iniciando criação dos PDFs por termo.")
         pdf = PdfFileReader(self.filename)
         npages = pdf.getNumPages()
         for npage in range(npages):
-            if self.breakpagestart > npage:
+            if self.breakpagestart != 0 and self.breakpagestart > npage:
                 continue
-            
-            if npage != 0 and npage > self.breakpageend:
+                
+            if self.breakpageend != 0 and self.breakpageend < npage:
                 break
 
             pdf_writer = PdfFileWriter()
@@ -201,6 +218,25 @@ class ExportSortedPDF:
         self.remover_nomes_file()
         if os.path.isdir(self.tempdir):
           os.rmdir(self.tempdir)        
+
+    def get_input_filename(self):
+        if self.filename:
+            return self.filename
+
+        paths = sorted(glob.glob('*.pdf'))
+        for path in paths:
+            return path
+
+    def get_output_filename(self):
+        if self.outputfile:
+            return self.outputfile
+        
+        regex_search = re.search(r'(.*)\.pdf', self.filename)
+        name = "outputfile.pdf"
+        if regex_search:
+            name = "{}_ordenado.pdf".format(regex_search.group(1).strip())
+        
+        return name
 
     def merge_pdf_files(self):
         self.logger.info("Iniciando a geração do PDF ordenado.")
